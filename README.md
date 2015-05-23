@@ -218,7 +218,6 @@ db.write_points([point])
 Run the poll-juniper.py script to start gathering statistics:
 
 ```
-$ influxdb -v
 $ python poll-juniper.py 
 No handlers could be found for logger "paramiko.hostkeys"
 Connected to  ( FIREFLY-PERIMETER running 12.1X47-D20.7 )
