@@ -1,21 +1,37 @@
 # What is Juniper-Grafana?
 
-Juniper-Grafana allows you to visualize statistics and telemetry from [Juniper Networks](http://juniper.net) devices using Grafana.
+Juniper-Grafana is a collection of Python scripts that allows you to visualize statistics and telemetry from [Juniper Networks](http://juniper.net) devices using Grafana.
 
-Because we use [NETCONF](http://www.juniper.net/documentation/en_US/junos13.2/information-products/pathway-pages/netconf-guide/netconf.html) to gather telemetry from the device, this should work with any Juniper device including [SRX](http://juniper.net/srx) firewalls, [MX](http://juniper.net/mx), [PTX](http://www.juniper.net/us/en/products-services/routing/ptx-series/), and [ACX](http://www.juniper.net/us/en/products-services/security/srx-series/vsrx/) routers, [EX](http://juniper.net/ex), [QFX](http://www.juniper.net/us/en/products-services/switching/qfx-series/), and [OCX](http://www.juniper.net/us/en/products-services/switching/ocx1100/) switches, including virtual devices such as the [vSRX](http://www.juniper.net/us/en/products-services/security/srx-series/vsrx/) virtual firewall and the [vMX](http://www.juniper.net/us/en/products-services/routing/mx-series/vmx/) virtual router.  We only tested with vSRX.
+These scripts gather the telemetry data using two different mechanisms:
 
-This example currently supports a limited set of interface statistics: bytes sent, bytes received, packets sent, packets received for every interface.  The intent is to add more statistics later on.
- 
+1. Periodic polling of interface traffic counters using NETCONF.
+2. Stream push of queue depths and latency using Google Protocol Buffers (GPB).
+
 Juniper-Grafana is implemented using:
 
 * [InfluxDB](http://influxdb.com/) as the time-series database.
 * [Grafana](http://grafana.org/) for visualization.
 * [PyEZ](http://techwiki.juniper.net/Automation_Scripting/010_Getting_Started_and_Reference/Junos_PyEZ) to implement the NETCONF interface to Juniper devices and gather telemetry data such as interface counters.
+* [Google Protocol Buffers (GPB)](https://developers.google.com/protocol-buffers/) to deserialize the analytics records streamed by a Juniper QFX switch.
 * The [vSRX](http://www.juniper.net/us/en/products-services/security/srx-series/vsrx/) virtual firewall to generate the telemetry data (as an example).
 
 All examples and scripts below are written for 64-bit Ubuntu 15.04.
 
 This is a personal project for fun.  It is not associated with Juniper Networks in any way, shape, or form.  There is no guarantee that this works or does anything useful.  There is no support.  If this causes your network to blow up, you cannot sue me.  You have been warned.  You are free to use this in any way you see fit subject to a few conditions.  See LICENSE file for same information in legalese.
+
+## NETCONF polling
+
+The script 'netconf-poll.py' uses NETCONF to periodically poll a Juniper device, retrieve interface traffic counters, and store them in the InfluxDB time series database.
+
+The script currently supports a limited set of interface statistics: bytes sent, bytes received, packets sent, packets received for every interface.  The intent is to add more statistics later on.
+ 
+Because we use [NETCONF](http://www.juniper.net/documentation/en_US/junos13.2/information-products/pathway-pages/netconf-guide/netconf.html) to gather telemetry from the device, this should work with any Juniper device including [SRX](http://juniper.net/srx) firewalls, [MX](http://juniper.net/mx), [PTX](http://www.juniper.net/us/en/products-services/routing/ptx-series/), and [ACX](http://www.juniper.net/us/en/products-services/security/srx-series/vsrx/) routers, [EX](http://juniper.net/ex), [QFX](http://www.juniper.net/us/en/products-services/switching/qfx-series/), and [OCX](http://www.juniper.net/us/en/products-services/switching/ocx1100/) switches, including virtual devices such as the [vSRX](http://www.juniper.net/us/en/products-services/security/srx-series/vsrx/) virtual firewall and the [vMX](http://www.juniper.net/us/en/products-services/routing/mx-series/vmx/) virtual router.  We only tested with vSRX.
+
+## Google Protocol Buffer (GPB) streaming
+
+The script 'gpb-stream.py' consumes Network Analytics records that are streamed using [Google Protocol Buffers (GPB)](https://developers.google.com/protocol-buffers/) from a Juniper QFX switch.
+
+[Network Analytics streaming](http://www.juniper.net/techpubs/en_US/junos14.1/topics/concept/analytics-overview.html) is supported on Juniper EX and QFX switches running Junos 13.2X50-D15 and later.  However, the CLI was changed in a non backwards compatible way in Junos 13.2X51-D15.  Here, we use the new CLI.
 
 # Installation
 
@@ -71,6 +87,18 @@ Install [PyEZ](https://techwiki.juniper.net/Automation_Scripting/010_Getting_Sta
 sudo apt-get install --yes libxml2-dev
 sudo apt-get install --yes libxslt1-dev
 pip install junos-eznc
+```
+
+## Install Google Protocol Buffers
+
+Install [Google Protocol Buffers (GPB)](https://developers.google.com/protocol-buffers/) for deserializing the streamed Network Analytics messages
+```
+sudo apt-get install --yes python-protobuf
+```
+
+Using the the Google Protocol Buffers compiler to compile the data model for the stream analytics messages (analytics.proto) into Python code for deserializing those messages:
+```
+protoc --python_out=. analytics.proto
 ```
 
 ## Install vSRX
@@ -162,11 +190,11 @@ We will only use the CLI and NETCONF interface, but in case you are interested, 
 
 The install.sh and startup.sh scripts automate all of the above installation steps, except for vSRX installation.
 
-# The demo
+# NETCONF polling
 
-## The poll-juniper.py script
+## The netconf-poll.py script
 
-The poll-juniper.py python script is an example of how to use PyEZ to retrieve statistics from a Juniper device and inject them into an InfluxDB time-series database.
+The netconf-poll.py python script is an example of how to use PyEZ to retrieve statistics from a Juniper device and inject them into an InfluxDB time-series database.
 
 It is not intended to be production quality code: it only collects statistics from a single device, lots of parameters that should be configurable are hard-coded, error handling is non-existent, etc.
 
@@ -296,7 +324,9 @@ Click on the floppy disk icon at the top (it will say "Save dashboard" when you 
 
 ![Grafana screenshot](grafana-screenshot.png)
 
+# Google Protocol Buffer (GPB) streaming
 
+(To be documented)
 
 
 

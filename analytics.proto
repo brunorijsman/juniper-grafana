@@ -1,0 +1,112 @@
+package analytics;
+
+// Traffic statistics related info
+message TrafficStatus {
+    optional uint32             status          = 1;
+    optional uint32             poll_interval   = 2;
+}
+
+// Queue statistics related info
+message QueueStatus {
+    optional uint32             status          = 1;
+    optional uint32             poll_interval   = 2;
+    optional uint64             lt_high         = 3;
+    optional uint64             lt_low          = 4;
+    optional uint64             dt_high         = 5;
+    optional uint64             dt_low          = 6;
+}
+
+message LinkStatus {
+    optional uint64             speed           = 1;
+    optional uint32             duplex          = 2;
+    optional uint32             mtu             = 3;
+    optional bool               state           = 4;
+    optional bool               auto_negotiation= 5;
+}
+
+message InterfaceInfo {
+    optional uint32             snmp_index      = 1;
+    optional uint32             index           = 2;
+    optional uint32             slot            = 3;
+    optional uint32             port            = 4;
+    optional uint32             media_type      = 5;
+    optional uint32             capability      = 6;
+    optional uint32             porttype        = 7;
+}
+
+message InterfaceStatus {
+    optional LinkStatus         link            = 1;
+    optional QueueStatus        queue_status    = 2;
+    optional TrafficStatus      traffic_status  = 3;
+}
+
+
+message QueueStats {
+    optional uint64             timestamp       = 1;
+    optional uint32             queue_depth     = 2;
+    optional uint32             latency         = 3;
+}
+
+message TrafficStats {
+    optional uint64             timestamp       = 1;
+    optional uint64             rxpkt           = 2;
+    optional uint64             rxucpkt         = 3;
+    optional uint64             rxmcpkt         = 4;
+    optional uint64             rxbcpkt         = 5;
+    optional uint64             rxpps           = 6;
+    optional uint64             rxbyte          = 7;
+    optional uint64             rxbps           = 8;
+    optional uint64             rxcrcerr        = 9;
+    optional uint64             rxdroppkt       = 10;
+    optional uint64             txpkt           = 11;
+    optional uint64             txucpkt         = 12;
+    optional uint64             txmcpkt         = 13;
+    optional uint64             txbcpkt         = 14;
+    optional uint64             txpps           = 15;
+    optional uint64             txbyte          = 16;
+    optional uint64             txbps           = 17;
+    optional uint64             txcrcerr        = 18;
+    optional uint64             txdroppkt       = 19;
+}
+
+message InterfaceStats {
+    optional TrafficStats       traffic_stats   = 1;
+    optional QueueStats         queue_stats     = 2;
+}
+
+//Interface message
+message Interface {
+    required string             name            = 1;                
+    optional bool               deleted         = 2;
+    optional InterfaceInfo      information     = 3;
+    optional InterfaceStats     stats           = 4;
+    optional InterfaceStatus    status          = 5;
+}
+
+message SystemInfo {
+    optional uint64             boot_time       = 1;
+    optional string             model_info      = 2;
+    optional string             serial_no       = 3; 
+    optional uint32             max_ports       = 4;
+    optional string             collector       = 5;
+    repeated string             interface_list  = 6;
+}
+
+message SystemStatus {
+    optional QueueStatus        queue_status    = 1;
+    optional TrafficStatus      traffic_status  = 2;
+}
+
+//System message
+message System {
+    required string             name            = 1;
+    optional bool               deleted         = 2;
+    optional SystemInfo         information     = 3;
+    optional SystemStatus       status          = 4;
+}
+
+message AnRecord {
+    optional uint64             timestamp       = 1;
+    optional System             system          = 2;
+    repeated Interface          interface       = 3;
+}
