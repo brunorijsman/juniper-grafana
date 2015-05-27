@@ -96,14 +96,17 @@ Install [Google Protocol Buffers (GPB)](https://developers.google.com/protocol-b
 sudo apt-get install --yes python-protobuf
 ```
 
-Using the the Google Protocol Buffers compiler to compile the data model for the stream analytics messages (analytics.proto) into Python code for deserializing those messages:
+## Compile analytics.proto
+
+Use the Google Protocol Buffers compiler (protoc) to compile the data model for the stream analytics messages (analytics.proto) into Python code for deserializing those messages:
 ```
 protoc --python_out=. analytics.proto
 ```
+This generates a Python module analytics_pb2.py.
 
 ## Install vSRX
 
-You will need some Juniper device to gather statistics from.  We use vSRX for testing.  If you have a Juniper support account you can download vSRX from [http://www.juniper.net/support/downloads/?p=firefly#sw](http://www.juniper.net/support/downloads/?p=firefly#sw).  You can download it as a VMware virtual machine or a KVM virtual machine.  Note that the product may be called JunosV Firefly Perimeter (or just Firefly for short) on the download page; that is the old name for vSRX.
+You will need some Juniper device to gather statistics from.  For NETCONF polling, we use vSRX for testing (for GPB streaming we have to use a physical QFX).  If you have a Juniper support account you can download vSRX from [http://www.juniper.net/support/downloads/?p=firefly#sw](http://www.juniper.net/support/downloads/?p=firefly#sw).  You can download it as a VMware virtual machine or a KVM virtual machine.  Note that the product may be called JunosV Firefly Perimeter (or just Firefly for short) on the download page; that is the old name for vSRX.
 
 Start the downloaded vSRX image using the virtual machine manager of your choice.
 
@@ -198,6 +201,8 @@ The netconf-poll.py python script is an example of how to use PyEZ to retrieve s
 
 It is not intended to be production quality code: it only collects statistics from a single device, lots of parameters that should be configurable are hard-coded, error handling is non-existent, etc.
 
+The script is very simple. In this section we explain the structure of the code - follow along by reading the netconf-poll.py source code.
+
 The script uses PyEZ to open a NETCONF connection to Juniper device, in our case a vSRX.  We use port 22 (SSH) instead of the default port 830 because for some reason port 830 traffic doesn't make it through the VMware NAT between my Linux VM and my vSRX VM.
 
 ```
@@ -228,12 +233,13 @@ ports = ports_table.get()
 
 We then iterate over all the ports and create data points for the counters:
 ```
-point = {'name': switch_name + '.' + port['name'],
-             'columns': columns,
-             'points': [[int(port['rx_packets']), 
-                         int(port['rx_bytes']), 
-                         int(port['tx_packets']), 
-                         int(port['tx_bytes'])]]}
+for port in ports:
+  point = {'name': switch_name + '.' + port['name'],
+           'columns': columns,
+           'points': [[int(port['rx_packets']), 
+                       int(port['rx_bytes']), 
+                       int(port['tx_packets']), 
+                       int(port['tx_bytes'])]]}
 ```
 
 Finally, we write the data points into the time-series database:
@@ -241,29 +247,7 @@ Finally, we write the data points into the time-series database:
 db.write_points([point])
 ```
 
-## Collecting statistics
-
-Run the poll-juniper.py script to start gathering statistics:
-
-```
-$ python poll-juniper.py 
-No handlers could be found for logger "paramiko.hostkeys"
-Connected to  ( FIREFLY-PERIMETER running 12.1X47-D20.7 )
-Connected to InfluxDB
-Collecting metrics...
-```
-
-## Viewing the time-series database
-
-We can look at the contents of the "network" time-series database in InfluxDB to make sure that statistics as being collected.
-
-As before, open the graphical user interface by using a web browser to navigate to URL [http://localhost:8083](http://localhost:8083).  The default user name is root and the default password is root.
-
-Click on "Databases" in the main menu at the top, and click on "Explore Data" for the "networks" database.  Enter "select * from /.*/" in the Query field and click on the "Execute Query" button.
-
-You should see graphs and a time-series table for the interface counters.
-
-## Generate some traffic
+## Generating some traffic
 
 We log in to the vSRX and issue a fast ping to generate a burst of traffic to make the graphs look a little bit more interesting:
 
@@ -279,7 +263,98 @@ PING 192.168.229.185 (192.168.229.185): 56 data bytes
 round-trip min/avg/max/stddev = 0.069/0.090/0.418/0.029 ms
 ```
 
-## Visualizing statistics
+## Running the script to collect statistics
+
+Run the poll-juniper.py script to start gathering statistics:
+
+```
+$ python poll-juniper.py 
+No handlers could be found for logger "paramiko.hostkeys"
+Connected to  ( FIREFLY-PERIMETER running 12.1X47-D20.7 )
+Connected to InfluxDB
+Collecting metrics...
+```
+
+# Google Protocol Buffer (GPB) streaming
+
+## The analytics.proto data model
+
+TODO: Explain the data model. Point to the official documentation.
+
+## The gpb-stream.py script
+
+The gpb-stream.py script listens for an incoming TCP connection from a QFX switch, parses the GPB-encoded stream of telemetry data, and stores a subset of the statistics (namely queue depth and latency) in the InfluxDB time-series database.
+
+Once again, this script is intended for instruction. It is not intended for production deployment.
+
+The main function connects to the InfluxDB data and then starts the server:
+```
+def main():
+    db = client.InfluxDBClient('localhost', INFLUX_DB_PORT, 'root', 'root', 'network')
+    print 'Connected to InfluxDB'
+    server(db)
+```
+
+The server function accepts an incoming TCP connection and processes telemetry records received over that TCP connection:
+```
+def server(db):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(('0.0.0.0', ANALYTICS_PORT))
+    sock.listen(1)
+    conn, addr = sock.accept()
+    print 'Accepted incoming TCP connection from', addr
+    while receive_record(db, conn):
+        pass
+    conn.close()
+```
+
+The receive_record function receives a single telemetry record over the TCP connection. Each record consists of an 8-byte header and a variable-length body. The header contains a 4-byte length field for the body, and a 1-byte version number. The body is de-serialized (decoded) using Google Protocol Buffers (GPB). The function to de-serialize the record (analytics_pb2.AnRecord().ParseFromString) is code that was generated by the GPB compiler when we compiled the analytics.proto data model.
+```
+def receive_record(db, conn):
+    data = conn.recv(HEADER_SIZE)
+    if not data:
+        print 'Connection closed'
+        return False
+    length = ord(data[0]) + (ord(data[1]) << 8) + (ord(data[2]) << 16) + (ord(data[3]) << 24)
+    version = ord(data[4])
+    if version != VERSION:
+        print 'Wrong version ', version
+        return False
+    data = conn.recv(length)
+    if not data:
+        print 'Connection closed'
+        return False
+    record = analytics_pb2.AnRecord()
+    record.ParseFromString(data)
+    process_record(db, record)
+    return True
+```
+
+TODO: Explain the structure of the rest of the code
+
+## Configuring the QFX to stream telemetry
+
+Unfortunately, we cannot use the vSRX as the device under test to stream telemetry data - it does not support that feature. We have to use a physical [QFX5100-Series](http://www.juniper.net/us/en/products-services/switching/qfx-series/qfx5100/) switch running Junos 13.2X51-D15 or later.
+
+TODO: Explain to configure the QFX to stream telemetry
+
+## Running the script to collect statistics
+
+TODO: Show example output of running the script
+
+# Viewing telemetry
+
+## Viewing the raw time-series in InfluxDB
+
+We can look at the contents of the "network" time-series database in InfluxDB to make sure that statistics as being collected.
+
+As before, open the graphical user interface by using a web browser to navigate to URL [http://localhost:8083](http://localhost:8083).  The default user name is root and the default password is root.
+
+Click on "Databases" in the main menu at the top, and click on "Explore Data" for the "networks" database.  Enter "select * from /.*/" in the Query field and click on the "Execute Query" button.
+
+You should see graphs and a time-series table for the interface counters.
+
+## Visualizing statistics in Grafana
 
 Now we use Grafana to visualize the counters.
 
@@ -308,6 +383,8 @@ Select "Home" in the top menu.
 
 Click on the "+ New" button in the drop down menu.
 
+## Visualizing NETCONF poll data
+
 Click on the little green bar in the first and only row, select "Add Panel" in the menu, and then "Graph"
 
 In the graph row, click on "no title (click here)".  Select "edit". A new menu will appear below the graph row.
@@ -324,11 +401,11 @@ Click on the floppy disk icon at the top (it will say "Save dashboard" when you 
 
 ![Grafana screenshot](grafana-screenshot.png)
 
-# Google Protocol Buffer (GPB) streaming
+## Visualizing GPB stream data
 
-(To be documented)
+TODO: Explain the steps
 
-
+TODO: Show a screen-shot
 
 
 
